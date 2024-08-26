@@ -1,5 +1,6 @@
 const fetch = require('node-fetch').default;
 const https = require('https');
+const http = require('http');
 const express = require('express');
 const { readSecret, SECRET_KEYS } = require('./secrets');
 const { getConfigValue, uuidv4 } = require('../util');
@@ -161,6 +162,10 @@ router.post('/lingva', jsonParser, async (request, response) => {
         if (!baseUrl) {
             console.log('Lingva URL is not configured.');
             return response.sendStatus(400);
+        }
+
+        if (request.body.lang === 'zh-CN') {
+            request.body.lang = 'zh';
         }
 
         const text = request.body.text;
