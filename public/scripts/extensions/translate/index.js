@@ -406,30 +406,47 @@ async function translate(text, lang) {
             lang = extension_settings.translate.target_language;
         }
 
-        switch (extension_settings.translate.provider) {
-            case 'libre':
-                return await translateProviderLibre(text, lang);
-            case 'google':
-                return await chunkedTranslate(text, lang, translateProviderGoogle, 5000);
-            case 'lingva':
-                return await chunkedTranslate(text, lang, translateProviderLingva, 5000);
-            case 'deepl':
-                return await translateProviderDeepl(text, lang);
-            case 'deeplx':
-                return await chunkedTranslate(text, lang, translateProviderDeepLX, 1500);
-            case 'oneringtranslator':
-                return await translateProviderOneRing(text, lang);
-            case 'bing':
-                return await chunkedTranslate(text, lang, translateProviderBing, 1000);
-            case 'yandex':
-                return await translateProviderYandex(text, lang);
-            default:
-                console.error('Unknown translation provider', extension_settings.translate.provider);
-                return text;
+        // split text by embedded images links
+        const chunks = text.split(/!\[.*?]\([^)]*\)/);
+        const links = [...text.matchAll(/!\[.*?]\([^)]*\)/g)];
+
+        let result = '';
+        for (let i = 0; i < chunks.length; i++) {
+            result += await translateInner(chunks[i], lang);
+            if (i < links.length) result += links[i][0];
         }
+
+        return result;
     } catch (error) {
         console.log(error);
         toastr.error(String(error), 'Failed to translate message');
+    }
+}
+
+async function translateInner(text, lang) {
+    if (text == '') {
+        return '';
+    }
+    switch (extension_settings.translate.provider) {
+        case 'libre':
+            return await translateProviderLibre(text, lang);
+        case 'google':
+            return await chunkedTranslate(text, lang, translateProviderGoogle, 5000);
+        case 'lingva':
+            return await chunkedTranslate(text, lang, translateProviderLingva, 5000);
+        case 'deepl':
+            return await translateProviderDeepl(text, lang);
+        case 'deeplx':
+            return await chunkedTranslate(text, lang, translateProviderDeepLX, 1500);
+        case 'oneringtranslator':
+            return await translateProviderOneRing(text, lang);
+        case 'bing':
+            return await chunkedTranslate(text, lang, translateProviderBing, 1000);
+        case 'yandex':
+            return await translateProviderYandex(text, lang);
+        default:
+            console.error('Unknown translation provider', extension_settings.translate.provider);
+            return text;
     }
 }
 
@@ -598,9 +615,20 @@ jQuery(async () => {
     $(document).on('click', '.mes_translate', onMessageTranslateClick);
     $('#translate_key_button').on('click', async () => {
         const optionText = $('#translation_provider option:selected').text();
-        const key = await callGenericPopup(`<h3>${optionText} API Key</h3>`, POPUP_TYPE.INPUT);
+        const key = await callGenericPopup(`<h3>${optionText} API Key</h3>`, POPUP_TYPE.INPUT, '', {
+            customButtons: [{
+                text: 'Remove Key',
+                appendAtEnd: true,
+                result: POPUP_RESULT.NEGATIVE,
+                action: async () => {
+                    await writeSecret(extension_settings.translate.provider, '');
+                    toastr.success('API Key removed');
+                    $('#translate_key_button').toggleClass('success', !!secret_state[extension_settings.translate.provider]);
+                },
+            }],
+        });
 
-        if (key == false) {
+        if (!key) {
             return;
         }
 
@@ -621,7 +649,7 @@ jQuery(async () => {
         const secretKey = extension_settings.translate.provider + '_url';
         const savedUrl = secret_state[secretKey] ? await findSecret(secretKey) : '';
 
-        const url = await callGenericPopup(popupText, POPUP_TYPE.INPUT, savedUrl,{
+        const url = await callGenericPopup(popupText, POPUP_TYPE.INPUT, savedUrl, {
             customButtons: [{
                 text: 'Remove URL',
                 appendAtEnd: true,
@@ -634,7 +662,7 @@ jQuery(async () => {
             }],
         });
 
-        if (url == false || url == '') {
+        if (!url) {
             return;
         }
 

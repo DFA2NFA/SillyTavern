@@ -1,9 +1,20 @@
+import {
+    moment,
+    DOMPurify,
+    Readability,
+    isProbablyReaderable,
+} from '../lib.js';
+
 import { getContext } from './extensions.js';
-import { getRequestHeaders } from '../script.js';
+import { characters, getRequestHeaders, this_chid } from '../script.js';
 import { isMobile } from './RossAscends-mods.js';
 import { collapseNewlines } from './power-user.js';
 import { debounce_timeout } from './constants.js';
 import { Popup, POPUP_RESULT, POPUP_TYPE } from './popup.js';
+import { SlashCommandClosure } from './slash-commands/SlashCommandClosure.js';
+import { getTagsList } from './tags.js';
+import { groups, selected_group } from './group-chats.js';
+import { getCurrentLocale } from './i18n.js';
 
 /**
  * Pagination status string template.
@@ -20,6 +31,38 @@ export const navigation_option = {
     previous: -1000,
 };
 
+/**
+ * Determines if a value is an object.
+ * @param {any} item The item to check.
+ * @returns {boolean} True if the item is an object, false otherwise.
+ */
+function isObject(item) {
+    return (item && typeof item === 'object' && !Array.isArray(item));
+}
+
+/**
+ * Merges properties of two objects. If the property is an object, it will be merged recursively.
+ * @param {object} target The target object
+ * @param {object} source The source object
+ * @returns {object} Merged object
+ */
+export function deepMerge(target, source) {
+    let output = Object.assign({}, target);
+    if (isObject(target) && isObject(source)) {
+        Object.keys(source).forEach(key => {
+            if (isObject(source[key])) {
+                if (!(key in target))
+                    Object.assign(output, { [key]: source[key] });
+                else
+                    output[key] = deepMerge(target[key], source[key]);
+            } else {
+                Object.assign(output, { [key]: source[key] });
+            }
+        });
+    }
+    return output;
+}
+
 export function escapeHtml(str) {
     return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
@@ -30,6 +73,74 @@ export function isValidUrl(value) {
         return true;
     } catch (_) {
         return false;
+    }
+}
+
+/**
+ * Converts string to a value of a given type. Includes pythonista-friendly aliases.
+ * @param {string|SlashCommandClosure} value String value
+ * @param {string} type Type to convert to
+ * @returns {any} Converted value
+ */
+export function convertValueType(value, type) {
+    if (value instanceof SlashCommandClosure || typeof type !== 'string') {
+        return value;
+    }
+
+    switch (type.trim().toLowerCase()) {
+        case 'string':
+        case 'str':
+            return String(value);
+
+        case 'null':
+            return null;
+
+        case 'undefined':
+        case 'none':
+            return undefined;
+
+        case 'number':
+            return Number(value);
+
+        case 'int':
+            return parseInt(value, 10);
+
+        case 'float':
+            return parseFloat(value);
+
+        case 'boolean':
+        case 'bool':
+            return isTrueBoolean(value);
+
+        case 'list':
+        case 'array':
+            try {
+                const parsedArray = JSON.parse(value);
+                if (Array.isArray(parsedArray)) {
+                    return parsedArray;
+                }
+                // The value is not an array
+                return [];
+            } catch {
+                return [];
+            }
+
+        case 'object':
+        case 'dict':
+        case 'dictionary':
+            try {
+                const parsedObject = JSON.parse(value);
+                if (typeof parsedObject === 'object') {
+                    return parsedObject;
+                }
+                // The value is not an object
+                return {};
+            } catch {
+                return {};
+            }
+
+        default:
+            return value;
     }
 }
 
@@ -538,12 +649,11 @@ export function sortByCssOrder(a, b) {
 /**
  * Trims a string to the end of a nearest sentence.
  * @param {string} input The string to trim.
- * @param {boolean} include_newline Whether to include a newline character in the trimmed string.
  * @returns {string} The trimmed string.
  * @example
  * trimToEndSentence('Hello, world! I am from'); // 'Hello, world!'
  */
-export function trimToEndSentence(input, include_newline = false) {
+export function trimToEndSentence(input) {
     if (!input) {
         return '';
     }
@@ -562,11 +672,6 @@ export function trimToEndSentence(input, include_newline = false) {
             } else {
                 last = i;
             }
-            break;
-        }
-
-        if (include_newline && char === '\n') {
-            last = i;
             break;
         }
     }
@@ -706,8 +811,8 @@ export function isOdd(number) {
 
 /**
  * Compare two moment objects for sorting.
- * @param {moment.Moment} a The first moment object.
- * @param {moment.Moment} b The second moment object.
+ * @param {import('moment').Moment} a The first moment object.
+ * @param {import('moment').Moment} b The second moment object.
  * @returns {number} A negative number if a is before b, a positive number if a is after b, or 0 if they are equal.
  */
 export function sortMoments(a, b) {
@@ -726,7 +831,7 @@ const dateCache = new Map();
  * Cached version of moment() to avoid re-parsing the same date strings.
  * Important: Moment objects are mutable, so use clone() before modifying them!
  * @param {string|number} timestamp String or number representing a date.
- * @returns {moment.Moment} Moment object
+ * @returns {import('moment').Moment} Moment object
  */
 export function timestampToMoment(timestamp) {
     if (dateCache.has(timestamp)) {
@@ -734,7 +839,7 @@ export function timestampToMoment(timestamp) {
     }
 
     const iso8601 = parseTimestamp(timestamp);
-    const objMoment = iso8601 ? moment(iso8601) : moment.invalid();
+    const objMoment = iso8601 ? moment(iso8601).locale(getCurrentLocale()) : moment.invalid();
 
     dateCache.set(timestamp, objMoment);
     return objMoment;
@@ -1367,6 +1472,15 @@ export function uuidv4() {
     });
 }
 
+/**
+ * Collapses multiple spaces in a strings into one.
+ * @param {string} s String to process
+ * @returns {string} String with collapsed spaces
+ */
+export function collapseSpaces(s) {
+    return s.replace(/\s+/g, ' ').trim();
+}
+
 function postProcessText(text, collapse = true) {
     // Remove carriage returns
     text = text.replace(/\r/g, '');
@@ -1417,38 +1531,9 @@ export async function getReadableText(document, textSelector = 'body') {
  * @returns {Promise<string>} A promise that resolves to the parsed text.
  */
 export async function extractTextFromPDF(blob) {
-    async function initPdfJs() {
-        const promises = [];
-
-        const workerPromise = new Promise((resolve, reject) => {
-            const workerScript = document.createElement('script');
-            workerScript.type = 'module';
-            workerScript.async = true;
-            workerScript.src = 'lib/pdf.worker.mjs';
-            workerScript.onload = resolve;
-            workerScript.onerror = reject;
-            document.head.appendChild(workerScript);
-        });
-
-        promises.push(workerPromise);
-
-        const pdfjsPromise = new Promise((resolve, reject) => {
-            const pdfjsScript = document.createElement('script');
-            pdfjsScript.type = 'module';
-            pdfjsScript.async = true;
-            pdfjsScript.src = 'lib/pdf.mjs';
-            pdfjsScript.onload = resolve;
-            pdfjsScript.onerror = reject;
-            document.head.appendChild(pdfjsScript);
-        });
-
-        promises.push(pdfjsPromise);
-
-        return Promise.all(promises);
-    }
-
     if (!('pdfjsLib' in window)) {
-        await initPdfJs();
+        await import('../lib/pdf.min.mjs');
+        await import('../lib/pdf.worker.min.mjs');
     }
 
     const buffer = await getFileBuffer(blob);
@@ -1487,30 +1572,9 @@ export async function extractTextFromMarkdown(blob) {
 }
 
 export async function extractTextFromEpub(blob) {
-    async function initEpubJs() {
-        const epubScript = new Promise((resolve, reject) => {
-            const epubScript = document.createElement('script');
-            epubScript.async = true;
-            epubScript.src = 'lib/epub.min.js';
-            epubScript.onload = resolve;
-            epubScript.onerror = reject;
-            document.head.appendChild(epubScript);
-        });
-
-        const jszipScript = new Promise((resolve, reject) => {
-            const jszipScript = document.createElement('script');
-            jszipScript.async = true;
-            jszipScript.src = 'lib/jszip.min.js';
-            jszipScript.onload = resolve;
-            jszipScript.onerror = reject;
-            document.head.appendChild(jszipScript);
-        });
-
-        return Promise.all([epubScript, jszipScript]);
-    }
-
     if (!('ePub' in window)) {
-        await initEpubJs();
+        await import('../lib/jszip.min.js');
+        await import('../lib/epub.min.js');
     }
 
     const book = ePub(blob);
@@ -1830,13 +1894,13 @@ export function select2ChoiceClickSubscribe(control, action, { buttonStyle = fal
  * @returns {string} The html representation of the highlighted regex
  */
 export function highlightRegex(regexStr) {
-    // Function to escape HTML special characters for safety
-    const escapeHtml = (str) => str.replace(/[&<>"']/g, match => ({
-        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', '\'': '&#39;',
+    // Function to escape special characters for safety or readability
+    const escape = (str) => str.replace(/[&<>"'\x01]/g, match => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', '\'': '&#39;', '\x01': '\\x01',
     })[match]);
 
-    // Replace special characters with their HTML-escaped forms
-    regexStr = escapeHtml(regexStr);
+    // Replace special characters with their escaped forms
+    regexStr = escape(regexStr);
 
     // Patterns that we want to highlight only if they are not escaped
     function getPatterns() {
@@ -1959,7 +2023,9 @@ export function toggleDrawer(drawer, expand = true) {
     }
 
     // Set the height of "autoSetHeight" textareas within the inline-drawer to their scroll height
-    content.querySelectorAll('textarea.autoSetHeight').forEach(resetScrollHeight);
+    if (!CSS.supports('field-sizing', 'content')) {
+        content.querySelectorAll('textarea.autoSetHeight').forEach(resetScrollHeight);
+    }
 }
 
 export async function fetchFaFile(name) {
@@ -1968,7 +2034,10 @@ export async function fetchFaFile(name) {
     document.head.append(style);
     const sheet = style.sheet;
     style.remove();
-    return [...sheet.cssRules].filter(it => it.style?.content).map(it => it.selectorText.split('::').shift().slice(1));
+    return [...sheet.cssRules]
+        .filter(rule => rule.style?.content)
+        .map(rule => rule.selectorText.split(/,\s*/).map(selector => selector.split('::').shift().slice(1)))
+    ;
 }
 export async function fetchFa() {
     return [...new Set((await Promise.all([
@@ -1994,7 +2063,7 @@ export async function showFontAwesomePicker(customList = null) {
                 qry.placeholder = 'Filter icons';
                 qry.autofocus = true;
                 const qryDebounced = debounce(() => {
-                    const result = faList.filter(it => it.includes(qry.value));
+                    const result = faList.filter(fa => fa.find(className => className.includes(qry.value.toLowerCase())));
                     for (const fa of faList) {
                         if (!result.includes(fa)) {
                             fas[fa].classList.add('hidden');
@@ -2015,10 +2084,10 @@ export async function showFontAwesomePicker(customList = null) {
                     fas[fa] = opt;
                     opt.classList.add('menu_button');
                     opt.classList.add('fa-solid');
-                    opt.classList.add(fa);
-                    opt.title = fa.slice(3);
+                    opt.classList.add(fa[0]);
+                    opt.title = fa.map(it => it.slice(3)).join(', ');
                     opt.dataset.result = POPUP_RESULT.AFFIRMATIVE.toString();
-                    opt.addEventListener('click', () => value = fa);
+                    opt.addEventListener('click', () => value = fa[0]);
                     grid.append(opt);
                 }
             }
@@ -2032,4 +2101,75 @@ export async function showFontAwesomePicker(customList = null) {
         return value;
     }
     return null;
+}
+
+/**
+ * Finds a character by name, with optional filtering and precedence for avatars
+ * @param {object} [options={}] - The options for the search
+ * @param {string?} [options.name=null] - The name to search for
+ * @param {boolean} [options.allowAvatar=true] - Whether to allow searching by avatar
+ * @param {boolean} [options.insensitive=true] - Whether the search should be case insensitive
+ * @param {string[]?} [options.filteredByTags=null] - Tags to filter characters by
+ * @param {boolean} [options.preferCurrentChar=true] - Whether to prefer the current character(s)
+ * @param {boolean} [options.quiet=false] - Whether to suppress warnings
+ * @returns {any?} - The found character or null if not found
+ */
+export function findChar({ name = null, allowAvatar = true, insensitive = true, filteredByTags = null, preferCurrentChar = true, quiet = false } = {}) {
+    const matches = (char) => !name || (allowAvatar && char.avatar === name) || (insensitive ? equalsIgnoreCaseAndAccents(char.name, name) : char.name === name);
+
+    // Filter characters by tags if provided
+    let filteredCharacters = characters;
+    if (filteredByTags) {
+        filteredCharacters = characters.filter(char => {
+            const charTags = getTagsList(char.avatar, false);
+            return filteredByTags.every(tagName => charTags.some(x => x.name == tagName));
+        });
+    }
+
+    // Get the current character(s)
+    /** @type {any[]} */
+    const currentChars = selected_group ? groups.find(group => group.id === selected_group)?.members.map(member => filteredCharacters.find(char => char.avatar === member))
+        : filteredCharacters.filter(char => characters[this_chid]?.avatar === char.avatar);
+
+    // If we have a current char and prefer it, return that if it matches
+    if (preferCurrentChar) {
+        const preferredCharSearch = currentChars.filter(matches);
+        if (preferredCharSearch.length > 1) {
+            if (!quiet) toastr.warning('Multiple characters found for given conditions.');
+            else console.warn('Multiple characters found for given conditions. Returning the first match.');
+        }
+        if (preferredCharSearch.length) {
+            return preferredCharSearch[0];
+        }
+    }
+
+    // If allowAvatar is true, search by avatar first
+    if (allowAvatar && name) {
+        const characterByAvatar = filteredCharacters.find(char => char.avatar === name);
+        if (characterByAvatar) {
+            return characterByAvatar;
+        }
+    }
+
+    // Search for matching characters by name
+    const matchingCharacters = name ? filteredCharacters.filter(matches) : filteredCharacters;
+    if (matchingCharacters.length > 1) {
+        if (!quiet) toastr.warning('Multiple characters found for given conditions.');
+        else console.warn('Multiple characters found for given conditions. Returning the first match.');
+    }
+
+    return matchingCharacters[0] || null;
+}
+
+/**
+ * Gets the index of a character based on the character object
+ * @param {object} char - The character object to find the index for
+ * @throws {Error} If the character is not found
+ * @returns {number} The index of the character in the characters array
+ */
+export function getCharIndex(char) {
+    if (!char) throw new Error('Character is undefined');
+    const index = characters.findIndex(c => c.avatar === char.avatar);
+    if (index === -1) throw new Error(`Character not found: ${char.avatar}`);
+    return index;
 }

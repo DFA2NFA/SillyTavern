@@ -1,3 +1,4 @@
+import { hljs, morphdom } from '../../../../lib.js';
 import { POPUP_RESULT, POPUP_TYPE, Popup } from '../../../popup.js';
 import { setSlashCommandAutoComplete } from '../../../slash-commands.js';
 import { SlashCommandAbortController } from '../../../slash-commands/SlashCommandAbortController.js';
@@ -11,7 +12,6 @@ import { SlashCommandParserError } from '../../../slash-commands/SlashCommandPar
 import { SlashCommandScope } from '../../../slash-commands/SlashCommandScope.js';
 import { debounce, delay, getSortableDelay, showFontAwesomePicker } from '../../../utils.js';
 import { log, quickReplyApi, warn } from '../index.js';
-import morphdom from '../lib/morphdom-esm.js';
 import { QuickReplyContextLink } from './QuickReplyContextLink.js';
 import { QuickReplySet } from './QuickReplySet.js';
 import { ContextMenu } from './ui/ctx/ContextMenu.js';
@@ -360,7 +360,7 @@ export class QuickReply {
                         del.classList.add('fa-solid');
                         del.classList.add('fa-trash-can');
                         del.classList.add('redWarningBG');
-                        del.title = 'Remove Quick Reply\n---\nShit+Click to skip confirmation';
+                        del.title = 'Remove Quick Reply\n---\nShift+Click to skip confirmation';
                         del.addEventListener('click', async(evt)=>{
                             if (!evt.shiftKey) {
                                 const result = await Popup.show.confirm(
@@ -1904,6 +1904,7 @@ export class QuickReply {
             executeOnAi: this.executeOnAi,
             executeOnChatChange: this.executeOnChatChange,
             executeOnGroupMemberDraft: this.executeOnGroupMemberDraft,
+            executeOnNewChat: this.executeOnNewChat,
             automationId: this.automationId,
         };
     }

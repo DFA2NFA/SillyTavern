@@ -1,3 +1,5 @@
+import { Fuse } from '../lib.js';
+
 import { callPopup, chat_metadata, eventSource, event_types, generateQuietPrompt, getCurrentChatId, getRequestHeaders, getThumbnailUrl, saveSettingsDebounced } from '../script.js';
 import { saveMetadataDebounced } from './extensions.js';
 import { SlashCommand } from './slash-commands/SlashCommand.js';
@@ -313,7 +315,7 @@ async function onDeleteBackgroundClick(e) {
     }
 }
 
-const autoBgPrompt = 'Pause your roleplay and choose a location ONLY from the provided list that is the most suitable for the current scene. Do not output any other text:\n{0}';
+const autoBgPrompt = 'Ignore previous instructions and choose a location ONLY from the provided list that is the most suitable for the current scene. Do not output any other text:\n{0}';
 
 async function autoBackgroundCommand() {
     /** @type {HTMLElement[]} */

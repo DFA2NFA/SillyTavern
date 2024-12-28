@@ -1,3 +1,4 @@
+import { DOMPurify } from '../lib.js';
 import { isMobile } from './RossAscends-mods.js';
 import { amount_gen, callPopup, eventSource, event_types, getRequestHeaders, max_context, online_status, setGenerationParamsFromPreset } from '../script.js';
 import { textgenerationwebui_settings as textgen_settings, textgen_types } from './textgen-settings.js';
@@ -12,6 +13,7 @@ let dreamGenModels = [];
 let vllmModels = [];
 let aphroditeModels = [];
 let featherlessModels = [];
+let tabbyModels = [];
 export let openRouterModels = [];
 
 /**
@@ -21,29 +23,42 @@ export let openRouterModels = [];
 const OPENROUTER_PROVIDERS = [
     'OpenAI',
     'Anthropic',
-    'HuggingFace',
     'Google',
-    'Mancer',
-    'Mancer 2',
+    'Google AI Studio',
+    'Groq',
+    'SambaNova',
+    'Cohere',
+    'Mistral',
     'Together',
+    'Together 2',
+    'Fireworks',
     'DeepInfra',
+    'Lepton',
+    'Novita',
+    'Avian',
+    'Lambda',
     'Azure',
     'Modal',
     'AnyScale',
     'Replicate',
     'Perplexity',
     'Recursal',
-    'Fireworks',
-    'Mistral',
-    'Groq',
-    'Cohere',
-    'Lepton',
     'OctoAI',
-    'Novita',
-    'Lynn',
-    'Lynn 2',
     'DeepSeek',
     'Infermatic',
+    'AI21',
+    'Featherless',
+    'Inflection',
+    'xAI',
+    '01.AI',
+    'HuggingFace',
+    'Mancer',
+    'Mancer 2',
+    'Hyperbolic',
+    'Hyperbolic 2',
+    'Lynn 2',
+    'Lynn',
+    'Reflection',
 ];
 
 export async function loadOllamaModels(data) {
@@ -63,6 +78,30 @@ export async function loadOllamaModels(data) {
         option.text = model.name;
         option.selected = model.id === textgen_settings.ollama_model;
         $('#ollama_model').append(option);
+    }
+}
+
+export async function loadTabbyModels(data) {
+    if (!Array.isArray(data)) {
+        console.error('Invalid Tabby models data', data);
+        return;
+    }
+
+    tabbyModels = data;
+    tabbyModels.sort((a, b) => a.id.localeCompare(b.id));
+    tabbyModels.unshift({ id: '' });
+
+    if (!tabbyModels.find(x => x.id === textgen_settings.tabby_model)) {
+        textgen_settings.tabby_model = tabbyModels[0]?.id || '';
+    }
+
+    $('#tabby_model').empty();
+    for (const model of tabbyModels) {
+        const option = document.createElement('option');
+        option.value = model.id;
+        option.text = model.id;
+        option.selected = model.id === textgen_settings.tabby_model;
+        $('#tabby_model').append(option);
     }
 }
 
@@ -240,19 +279,216 @@ export async function loadAphroditeModels(data) {
     }
 }
 
+let featherlessCurrentPage = 1;
 export async function loadFeatherlessModels(data) {
+    const searchBar = document.getElementById('featherless_model_search_bar');
+    const modelCardBlock = document.getElementById('featherless_model_card_block');
+    const paginationContainer = $('#featherless_model_pagination_container');
+    const sortOrderSelect = document.getElementById('featherless_model_sort_order');
+    const classSelect = document.getElementById('featherless_class_selection');
+    const categoriesSelect = document.getElementById('featherless_category_selection');
+    const storageKey = 'FeatherlessModels_PerPage';
+
+    // Store the original models data for search and filtering
+    let originalModels = [];
+
     if (!Array.isArray(data)) {
         console.error('Invalid Featherless models data', data);
         return;
     }
 
+    // Sort the data by model id (default A-Z)
     data.sort((a, b) => a.id.localeCompare(b.id));
+    originalModels = data;  // Store the original data for search
     featherlessModels = data;
 
     if (!data.find(x => x.id === textgen_settings.featherless_model)) {
         textgen_settings.featherless_model = data[0]?.id || '';
     }
 
+    // Populate class select options with unique classes
+    populateClassSelection(data);
+
+    // Retrieve the stored number of items per page or default to 10
+    const perPage = Number(localStorage.getItem(storageKey)) || 10;
+
+    // Initialize pagination with the full set of models
+    const currentModelIndex = data.findIndex(x => x.id === textgen_settings.featherless_model);
+    featherlessCurrentPage = currentModelIndex >= 0 ? (currentModelIndex / perPage) + 1 : 1;
+    setupPagination(originalModels, perPage);
+
+    // Function to set up pagination (also used for filtered results)
+    function setupPagination(models, perPage, pageNumber = featherlessCurrentPage) {
+        paginationContainer.pagination({
+            dataSource: models,
+            pageSize: perPage,
+            pageNumber: pageNumber,
+            sizeChangerOptions: [6, 10, 26, 50, 100, 250, 500, 1000],
+            pageRange: 1,
+            showPageNumbers: true,
+            showSizeChanger: false,
+            prevText: '<',
+            nextText: '>',
+            formatNavigator: function (currentPage, totalPage) {
+                return (currentPage - 1) * perPage + 1 + ' - ' + currentPage * perPage + ' of ' + totalPage * perPage;
+            },
+            showNavigator: true,
+            callback: function (modelsOnPage, pagination) {
+                modelCardBlock.innerHTML = '';
+
+                modelsOnPage.forEach(model => {
+                    const card = document.createElement('div');
+                    card.classList.add('model-card');
+
+                    const modelNameContainer = document.createElement('div');
+                    modelNameContainer.classList.add('model-name-container');
+
+                    const modelTitle = document.createElement('div');
+                    modelTitle.classList.add('model-title');
+                    modelTitle.textContent = model.id.replace(/_/g, '_\u200B');
+                    modelNameContainer.appendChild(modelTitle);
+
+                    const detailsContainer = document.createElement('div');
+                    detailsContainer.classList.add('details-container');
+
+                    const modelClassDiv = document.createElement('div');
+                    modelClassDiv.classList.add('model-class');
+                    modelClassDiv.textContent = `Class: ${model.model_class || 'N/A'}`;
+
+                    const contextLengthDiv = document.createElement('div');
+                    contextLengthDiv.classList.add('model-context-length');
+                    contextLengthDiv.textContent = `Context Length: ${model.context_length}`;
+
+                    const dateAddedDiv = document.createElement('div');
+                    dateAddedDiv.classList.add('model-date-added');
+                    dateAddedDiv.textContent = `Added On: ${new Date(model.updated_at).toLocaleDateString()}`;
+
+                    detailsContainer.appendChild(modelClassDiv);
+                    detailsContainer.appendChild(contextLengthDiv);
+                    detailsContainer.appendChild(dateAddedDiv);
+
+                    card.appendChild(modelNameContainer);
+                    card.appendChild(detailsContainer);
+
+                    modelCardBlock.appendChild(card);
+
+                    if (model.id === textgen_settings.featherless_model) {
+                        card.classList.add('selected');
+                    }
+
+                    card.addEventListener('click', function () {
+                        document.querySelectorAll('.model-card').forEach(c => c.classList.remove('selected'));
+                        card.classList.add('selected');
+                        onFeatherlessModelSelect(model.id);
+                    });
+                });
+
+                // Update the current page value whenever the page changes
+                featherlessCurrentPage = pagination.pageNumber;
+            },
+            afterSizeSelectorChange: function (e) {
+                const newPerPage = e.target.value;
+                localStorage.setItem('Models_PerPage', newPerPage);
+                setupPagination(models, Number(newPerPage), featherlessCurrentPage); // Use the stored current page number
+            },
+        });
+    }
+
+    // Unset previously added listeners
+    $(searchBar).off('input');
+    $(sortOrderSelect).off('change');
+    $(classSelect).off('change');
+    $(categoriesSelect).off('change');
+
+    // Add event listener for input on the search bar
+    searchBar.addEventListener('input', function () {
+        applyFiltersAndSort();
+    });
+
+    // Add event listener for the sort order select
+    sortOrderSelect.addEventListener('change', function () {
+        applyFiltersAndSort();
+    });
+
+    // Add event listener for the class select
+    classSelect.addEventListener('change', function () {
+        applyFiltersAndSort();
+    });
+
+    categoriesSelect.addEventListener('change', function () {
+        applyFiltersAndSort();
+    });
+
+    // Function to populate class selection dropdown
+    function populateClassSelection(models) {
+        const uniqueClasses = [...new Set(models.map(model => model.model_class).filter(Boolean))];  // Get unique class names
+        uniqueClasses.sort((a, b) => a.localeCompare(b));
+        uniqueClasses.forEach(className => {
+            const option = document.createElement('option');
+            option.value = className;
+            option.textContent = className;
+            classSelect.appendChild(option);
+        });
+    }
+
+    // Function to apply sorting and filtering based on user input
+    async function applyFiltersAndSort() {
+        if (!(searchBar instanceof HTMLInputElement) ||
+            !(sortOrderSelect instanceof HTMLSelectElement) ||
+            !(classSelect instanceof HTMLSelectElement) ||
+            !(categoriesSelect instanceof HTMLSelectElement)) {
+            return;
+        }
+        const searchQuery = searchBar.value.toLowerCase();
+        const selectedSortOrder = sortOrderSelect.value;
+        const selectedClass = classSelect.value;
+        const selectedCategory = categoriesSelect.value;
+        let featherlessTop = [];
+        let featherlessNew = [];
+
+        if (selectedCategory === 'Top') {
+            featherlessTop = await fetchFeatherlessStats();
+        }
+        const featherlessIds = featherlessTop.map(stat => stat.id);
+        if (selectedCategory === 'New') {
+            featherlessNew = await fetchFeatherlessNew();
+        }
+        const featherlessNewIds = featherlessNew.map(stat => stat.id);
+
+        let filteredModels = originalModels.filter(model => {
+            const matchesSearch = model.id.toLowerCase().includes(searchQuery);
+            const matchesClass = selectedClass ? model.model_class === selectedClass : true;
+            const matchesTop = featherlessIds.includes(model.id);
+            const matchesNew = featherlessNewIds.includes(model.id);
+
+            if (selectedCategory === 'All') {
+                return matchesSearch && matchesClass;
+            }
+            else if (selectedCategory === 'Top') {
+                return matchesSearch && matchesClass && matchesTop;
+            }
+            else if (selectedCategory === 'New') {
+                return matchesSearch && matchesClass && matchesNew;
+            }
+            else {
+                return matchesSearch;
+            }
+        });
+
+        if (selectedSortOrder === 'asc') {
+            filteredModels.sort((a, b) => a.id.localeCompare(b.id));
+        } else if (selectedSortOrder === 'desc') {
+            filteredModels.sort((a, b) => b.id.localeCompare(a.id));
+        } else if (selectedSortOrder === 'date_asc') {
+            filteredModels.sort((a, b) => a.updated_at.localeCompare(b.updated_at));
+        } else if (selectedSortOrder === 'date_desc') {
+            filteredModels.sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+        }
+
+        setupPagination(filteredModels, Number(localStorage.getItem(storageKey)) || perPage, featherlessCurrentPage);
+    }
+
+    // Required to keep the /model command function
     $('#featherless_model').empty();
     for (const model of data) {
         const option = document.createElement('option');
@@ -263,15 +499,49 @@ export async function loadFeatherlessModels(data) {
     }
 }
 
-function onFeatherlessModelSelect() {
-    const modelId = String($('#featherless_model').val());
-    textgen_settings.featherless_model = modelId;
-    $('#api_button_textgenerationwebui').trigger('click');
+async function fetchFeatherlessStats() {
+    const response = await fetch('https://api.featherless.ai/feather/popular');
+    const data = await response.json();
+    return data.popular;
+}
+
+async function fetchFeatherlessNew() {
+    const response = await fetch('https://api.featherless.ai/feather/models?sort=-created_at&perPage=10');
+    const data = await response.json();
+    return data.items;
+}
+
+function onFeatherlessModelSelect(modelId) {
     const model = featherlessModels.find(x => x.id === modelId);
+    textgen_settings.featherless_model = modelId;
+    $('#featherless_model').val(modelId);
+    $('#api_button_textgenerationwebui').trigger('click');
     setGenerationParamsFromPreset({ max_length: model.context_length });
 }
 
+let featherlessIsGridView = false;  // Default state set to grid view
 
+// Ensure the correct initial view is applied when the page loads
+document.addEventListener('DOMContentLoaded', function () {
+    const modelCardBlock = document.getElementById('featherless_model_card_block');
+    modelCardBlock.classList.add('list-view');
+
+    const toggleButton = document.getElementById('featherless_model_grid_toggle');
+    toggleButton.addEventListener('click', function () {
+        // Toggle between grid and list view
+        if (featherlessIsGridView) {
+            modelCardBlock.classList.remove('grid-view');
+            modelCardBlock.classList.add('list-view');
+            this.title = 'Toggle to grid view';
+        } else {
+            modelCardBlock.classList.remove('list-view');
+            modelCardBlock.classList.add('grid-view');
+            this.title = 'Toggle to list view';
+        }
+
+        featherlessIsGridView = !featherlessIsGridView;
+    });
+});
 function onMancerModelSelect() {
     const modelId = String($('#mancer_model').val());
     textgen_settings.mancer_model = modelId;
@@ -307,6 +577,12 @@ function onDreamGenModelSelect() {
 function onOllamaModelSelect() {
     const modelId = String($('#ollama_model').val());
     textgen_settings.ollama_model = modelId;
+    $('#api_button_textgenerationwebui').trigger('click');
+}
+
+function onTabbyModelSelect() {
+    const modelId = String($('#tabby_model').val());
+    textgen_settings.tabby_model = modelId;
     $('#api_button_textgenerationwebui').trigger('click');
 }
 
@@ -434,20 +710,6 @@ function getAphroditeModelTemplate(option) {
     return $((`
         <div class="flex-container flexFlowColumn">
             <div><strong>${DOMPurify.sanitize(model.id)}</strong></div>
-        </div>
-    `));
-}
-
-function getFeatherlessModelTemplate(option) {
-    const model = featherlessModels.find(x => x.id === option?.element?.value);
-
-    if (!option.id || !model) {
-        return option.text;
-    }
-
-    return $((`
-        <div class="flex-container flexFlowColumn">
-            <div><strong>${DOMPurify.sanitize(model.name)}</strong> | <span>${model.context_length || '???'} tokens</span></div>
         </div>
     `));
 }
@@ -590,6 +852,9 @@ function calculateOpenRouterCost() {
 export function getCurrentOpenRouterModelTokenizer() {
     const modelId = textgen_settings.openrouter_model;
     const model = openRouterModels.find(x => x.id === modelId);
+    if (modelId?.includes('jamba')) {
+        return tokenizers.JAMBA;
+    }
     switch (model?.architecture?.tokenizer) {
         case 'Llama2':
             return tokenizers.LLAMA;
@@ -603,6 +868,10 @@ export function getCurrentOpenRouterModelTokenizer() {
             return tokenizers.GEMMA;
         case 'Claude':
             return tokenizers.CLAUDE;
+        case 'Cohere':
+            return tokenizers.COMMAND_R;
+        case 'Qwen':
+            return tokenizers.QWEN2;
         default:
             return tokenizers.OPENAI;
     }
@@ -632,8 +901,9 @@ export function initTextGenModels() {
     $('#ollama_download_model').on('click', downloadOllamaModel);
     $('#vllm_model').on('change', onVllmModelSelect);
     $('#aphrodite_model').on('change', onAphroditeModelSelect);
-    $('#featherless_model').on('change', onFeatherlessModelSelect);
     $('#tabby_download_model').on('click', downloadTabbyModel);
+    $('#tabby_model').on('change', onTabbyModelSelect);
+    $('#featherless_model').on('change', () => onFeatherlessModelSelect(String($('#featherless_model').val())));
 
     const providersSelect = $('.openrouter_providers');
     for (const provider of OPENROUTER_PROVIDERS) {
@@ -663,6 +933,13 @@ export function initTextGenModels() {
             searchInputPlaceholder: 'Search models...',
             searchInputCssClass: 'text_pole',
             width: '100%',
+        });
+        $('#tabby_model').select2({
+            placeholder: '[Currently loaded]',
+            searchInputPlaceholder: 'Search models...',
+            searchInputCssClass: 'text_pole',
+            width: '100%',
+            allowClear: true,
         });
         $('#model_infermaticai_select').select2({
             placeholder: 'Select a model',
@@ -698,13 +975,6 @@ export function initTextGenModels() {
             searchInputCssClass: 'text_pole',
             width: '100%',
             templateResult: getAphroditeModelTemplate,
-        });
-        $('#featherless_model').select2({
-            placeholder: 'Select a model',
-            searchInputPlaceholder: 'Search models...',
-            searchInputCssClass: 'text_pole',
-            width: '100%',
-            templateResult: getFeatherlessModelTemplate,
         });
         providersSelect.select2({
             sorter: data => data.sort((a, b) => a.text.localeCompare(b.text)),
